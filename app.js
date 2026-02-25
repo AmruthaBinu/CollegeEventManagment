@@ -1,82 +1,151 @@
-const Express=require("express")
-const Mongoose=require("mongoose")
-const Cors=require("cors")
-const Bcrypt=require("bcrypt")
-const Jwt=require("jsonwebtoken")
-const userModel = require("./models/users")
+// Load environment variables
+require("dotenv").config();
 
-let app=Express()
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
-app.use(Express.json())
-app.use(Cors())
-
-Mongoose.connect("mongodb+srv://amruthabinu:amruthabinu2002@cluster0.bwn2sfy.mongodb.net/collegeEventDb?retryWrites=true&w=majority&appName=Cluster0")
-
-
-//SIGNIN
-app.post("/signin",(req,res)=>{
-    let input=req.body
-    let result=userModel.find({email:req.body.email}).then(
-        (items)=>{
-            if (items.length>0) {
-
-                const passwordValidator=Bcrypt.compareSync(req.body.password,items[0].password)
-                if (passwordValidator) {
-                    Jwt.sign({email:req.body.email},"collegeEventApp",{expiresIn:"1d"},
-                        (error,token)=>{
-                            if (error) {
-                                res.json({"status":"error","errorMessage":error})
-                            } else {
-                                res.json({"status":"success","token":token,"userId":items[0]._id})
-                            }
-                        }
-                    )
-                    
-                } else {
-                    res.json({"status":"Incorrect password"})
-                    
-                }
-                
-            } else {
-                res.json({"status":"Invalid email id"})
-            }
-
-        }
-    ).catch()
-})
+const userModel = require("./models/users");
+const departmentRoutes = require("./routes/departmentRoutes");
+const userRoutes = require("./routes/userRoutes");
+const eventRoutes = require("./routes/eventRoutes");
+const registrationRoutes = require("./routes/registrationRoutes");
 
 
+const app = express();
 
-//SIGNUP
-app.post("/signup",(req,res)=>{
+app.use(express.json());
+app.use(cors());
+app.use("/api/departments", departmentRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/events", eventRoutes);
+app.use("/api/registrations", registrationRoutes);
+
+
+/* ===============================
+   MongoDB Connection
+================================= */
+
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log("MongoDB Connected"))
+  .catch(err => console.log("MongoDB Error:", err));
+
+/* ==========================================
+   CREATE ADMIN (Run Once Then Remove Route)
+============================================= */
+
+app.post("/create-admin", async (req, res) => {
+  try {
+
+    const existingAdmin = await userModel.findOne({ role: "Admin" });
+
+    if (existingAdmin) {
+      return res.json({ status: "Admin already exists" });
+    }
+
+    const hashedPassword = bcrypt.hashSync("admin123", 10);
+
+    const adminUser = new userModel({
+      name: "Amrutha",
+      email: "amruthabinu133@gmail.com",
+      password: hashedPassword,
+      role: "Admin"
+    });
+
+    await adminUser.save();
+
+    res.json({ status: "Admin created successfully" });
+
+  } catch (error) {
+    res.json({ status: "Error", error: error.message });
+  }
+});
+
+/* ===============================
+   SIGNUP API (Student Only)
+================================= */
+
+app.post("/signup", async (req, res) => {
+  try {
+
+    const { name, email, password } = req.body;
+
+    const existingUser = await userModel.findOne({ email });
+
+    if (existingUser) {
+      return res.json({ status: "Email already exists" });
+    }
+
+    const hashedPassword = bcrypt.hashSync(password, 10);
+
+    const newUser = new userModel({
+      name,
+      email,
+      password: hashedPassword,
+      role: "Student"   // Default role
+    });
+
+    await newUser.save();
+
+    res.json({ status: "Signup successful (Student)" });
+
+  } catch (error) {
+    res.json({ status: "Error", error: error.message });
+  }
+});
+
+/* ===============================
+   SIGNIN API (All Roles)
+================================= */
+
+app.post("/signin", async (req, res) => {
+  try {
+
+    const { email, password } = req.body;
+
+    const user = await userModel.findOne({ email });
+
+
+    if (!user) {
+      return res.json({ status: "Invalid email id" });
+    }
+
+    const passwordValidator = bcrypt.compareSync(
+      password,
+      user.password
+    );
+
+    if (!passwordValidator) {
+      return res.json({ status: "Incorrect password" });
+    }
+
+    const token = jwt.sign(
+      {
+        userId: user._id,
+        role: user.role
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
+
+    res.json({
+      status: "Login successful",
+      token,
+      role: user.role
+    });
     
-    let input=req.body
-    let hashedPassword = Bcrypt.hashSync(req.body.password,10)
-    console.log(hashedPassword)
-    req.body.password=hashedPassword
-    
-    userModel.find({email:req.body.email}).then(
 
-        (items)=>{
-            if(items.length>0){
-                res.json({"status":"Email id already exist"})
-            }
-            else{
+  } catch (error) {
+    res.json({ status: "Error", error: error.message });
+  }
+});
 
-                let result=new userModel(input)
-                result.save()
-                res.json({"status":"Successfull"})
-            }
-        }
+/* ===============================
+   Start Server
+================================= */
 
-    ).catch(
-        (error)=>{}
-    )
-
-
-
-})
-
-app.listen(4050,()=>{
-    console.log("Server Started")
-})
+app.listen(4050, () => {
+  console.log("Server Started on port 4050");
+});
